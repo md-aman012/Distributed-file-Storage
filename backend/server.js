@@ -14,6 +14,7 @@ app.use(express.json()); // Parses incoming JSON requests
 
 // Import routes
 const authRoutes = require('./src/routes/authRoutes');
+const fileRoutes = require('./src/routes/fileRoutes');
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -23,6 +24,7 @@ app.get('/api/health', (req, res) => {
 
 // Register routes
 app.use('/api/auth', authRoutes);
+app.use('/api/files', fileRoutes);
 
 // Start the server
 app.listen(PORT, () => {
