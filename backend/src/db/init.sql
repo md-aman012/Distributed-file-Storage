@@ -22,5 +22,6 @@ CREATE TABLE IF NOT EXISTS files (
   s3_key        TEXT NOT NULL UNIQUE,
   file_size     BIGINT NOT NULL,
   mime_type     VARCHAR(100) NOT NULL,
+  is_shared     BOOLEAN DEFAULT FALSE,
   uploaded_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

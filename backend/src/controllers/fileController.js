@@ -1,3 +1,6 @@
+const { GetObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const s3Client = require('../config/s3');
 const db = require('../config/db');
 
 // @desc    Upload a file to S3 and save its metadata to the database
@@ -92,8 +95,142 @@ const getFileById = async (req, res) => {
   }
 };
 
+// @desc    Get an S3 presigned URL for downloading a file
+// @route   GET /api/files/:id/download
+// @access  Private
+const getDownloadUrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const fileId = req.params.id;
+
+    // Verify ownership and get s3_key
+    const result = await db.query(
+      `SELECT s3_key, original_name, mime_type FROM files WHERE id = $1 AND user_id = $2`,
+      [fileId, userId]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ message: 'File not found' });
+    const file = result.rows[0];
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: file.s3_key,
+      ResponseContentDisposition: `attachment; filename="${file.original_name}"`,
+      ResponseContentType: file.mime_type
+    });
+
+    // URL expires in 1 hour
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    res.json({ url });
+  } catch (error) {
+    console.error('Error in getDownloadUrl:', error);
+    res.status(500).json({ message: 'Server error generating download link' });
+  }
+};
+
+// @desc    Delete a file (DB + S3)
+// @route   DELETE /api/files/:id
+// @access  Private
+const deleteFile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const fileId = req.params.id;
+
+    const result = await db.query(
+      `SELECT s3_key FROM files WHERE id = $1 AND user_id = $2`,
+      [fileId, userId]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ message: 'File not found' });
+    const file = result.rows[0];
+
+    // Delete from S3
+    const command = new DeleteObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: file.s3_key,
+    });
+    await s3Client.send(command);
+
+    // Delete from DB
+    await db.query(`DELETE FROM files WHERE id = $1 AND user_id = $2`, [fileId, userId]);
+
+    res.json({ message: 'File deleted successfully' });
+  } catch (error) {
+    console.error('Error in deleteFile:', error);
+    res.status(500).json({ message: 'Server error deleting file' });
+  }
+};
+
+// @desc    Toggle file sharing
+// @route   PATCH /api/files/:id/share
+// @access  Private
+const toggleShare = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const fileId = req.params.id;
+
+    const result = await db.query(
+      `UPDATE files SET is_shared = NOT is_shared WHERE id = $1 AND user_id = $2 RETURNING is_shared`,
+      [fileId, userId]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ message: 'File not found' });
+
+    res.json({ is_shared: result.rows[0].is_shared });
+  } catch (error) {
+    console.error('Error in toggleShare:', error);
+    res.status(500).json({ message: 'Server error toggling share status' });
+  }
+};
+
+// @desc    Get public shared file metadata and download link
+// @route   GET /api/files/shared/:id
+// @access  Public
+const getSharedFile = async (req, res) => {
+  try {
+    const fileId = req.params.id;
+
+    const result = await db.query(
+      `SELECT original_name, file_size, mime_type, s3_key, is_shared FROM files WHERE id = $1`,
+      [fileId]
+    );
+
+    if (result.rows.length === 0 || !result.rows[0].is_shared) {
+      return res.status(404).json({ message: 'File not found or not shared' });
+    }
+
+    const file = result.rows[0];
+
+    // Generate presigned URL for public download
+    const command = new GetObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME,
+      Key: file.s3_key,
+      ResponseContentDisposition: `attachment; filename="${file.original_name}"`,
+      ResponseContentType: file.mime_type
+    });
+
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+
+    res.json({
+      file: {
+        original_name: file.original_name,
+        file_size: file.file_size,
+        mime_type: file.mime_type
+      },
+      downloadUrl: url
+    });
+  } catch (error) {
+    console.error('Error in getSharedFile:', error);
+    res.status(500).json({ message: 'Server error fetching shared file' });
+  }
+};
+
 module.exports = {
   uploadFile,
   getMyFiles,
   getFileById,
+  getDownloadUrl,
+  deleteFile,
+  toggleShare,
+  getSharedFile,
 };
