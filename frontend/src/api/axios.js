@@ -4,7 +4,7 @@ import axios from 'axios';
 // In production (Vercel): VITE_API_URL is set to the Render backend URL
 // via Vercel's Environment Variables dashboard.
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://distributed-file-storage-66zm.onrender.com/api',
 });
 
 // Request interceptor — attach the JWT on every private request
